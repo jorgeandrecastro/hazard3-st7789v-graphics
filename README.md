@@ -3,42 +3,60 @@
 Couche graphique 2D `no_std` pour écrans TFT LCD **ST7789V 240×320**,
 construite au-dessus de [`embassy-st7789v`](https://crates.io/crates/embassy-st7789v).
 
-## Fonctionnalités ajoutées
+## Fonctionnalités nouvelles : Framebuffer, Version 0.2.0 voir CHANGELOG.md 
 
-| Fonction          | Algorithme                  |
-|-------------------|-----------------------------|
-| `line`            | Bresenham integer-only      |
-| `circle`          | Midpoint integer-only       |
-| `fill_circle`     | Midpoint + hlines SPI batch |
-| `triangle`        | 3 × `line`                  |
-| `fill_triangle`   | Scanline integer-only       |
-| `ellipse`         | Midpoint généralisé         |
-| `bezier_quad`     | De Casteljau integer-only   |
+| Fonction               | Algorithme                  | Direct SPI | Framebuffer |
+|------------------------|-----------------------------|:----------:|:-----------:|
+| `line`                 | Bresenham integer-only      | ✓ async    | ✓ sync      |
+| `circle`               | Midpoint integer-only       | ✓ async    | ✓ sync      |
+| `fill_circle`          | Midpoint + hlines SPI batch | ✓ async    | ✓ sync      |
+| `triangle`             | 3 × `line`                  | ✓ async    | ✓ sync      |
+| `fill_triangle`        | Scanline integer-only       | ✓ async    | ✓ sync      |
+| `ellipse`              | Midpoint généralisé         | ✓ async    | ✓ sync      |
+| `bezier_quad`          | De Casteljau integer-only   | ✓ async    | ✓ sync      |
 
 Toutes les primitives :
+
 - Zéro allocation (`no_std`, pas de `Vec`)
 - Zéro flottant (sûr sur MCU sans FPU)
 - Clipping automatique sur 240×320
 - Couleurs `Color` RGB565 (même type que le driver)
 
+---
+
+## Deux modes d'utilisation
+
+### Mode direct SPI (`Graphics`)
+
+Chaque primitive envoie les pixels immédiatement via SPI.
+Simple, mais peut produire un clignotement si l'écran est redessiné fréquemment.
+
+### Mode framebuffer (`GraphicsBuffered`)
+
+Toutes les primitives écrivent en RAM (synchrones, sans `.await`).
+Un seul appel `flush()` envoie tout d'un coup  **zéro clignotement**.
+Nécessite `St7789vBuffered` du crate `embassy-st7789v` (150 Ko RAM).
+
+---
+
 ## Démarrage rapide
 
 ```toml
 [dependencies]
-embassy-st7789v          = "0.1"
-embassy-st7789v-graphics = "0.1"
+embassy-st7789v          = "0.2"
+embassy-st7789v-graphics = "0.2"
 ```
+
+### Mode direct (async)
 
 ```rust
 use embassy_st7789v::{Color, St7789v};
 use embassy_st7789v_graphics::{Graphics, circle, fill_triangle, line};
 
-// Init du driver
 let mut ecran = St7789v::new(spi_device, broche_dc, broche_rst);
 ecran.init().await.unwrap();
 ecran.fill_screen(Color::BLACK).await.unwrap();
 
-// Primitives graphiques
 {
     let mut gfx = Graphics::new(&mut ecran);
     line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;
@@ -46,17 +64,47 @@ ecran.fill_screen(Color::BLACK).await.unwrap();
     fill_triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::YELLOW).await;
 } // ← borrow libéré
 
-// Texte via le driver directement
 ecran.draw_str(8, 8, b"BONJOUR", Color::WHITE, Color::BLACK).await.unwrap();
 ```
+
+### Mode framebuffer (sync + flush) — zéro clignotement
+
+```rust
+use embassy_st7789v::{Color, St7789v, St7789vBuffered};
+use embassy_st7789v_graphics::{GraphicsBuffered, circle_buf, fill_triangle_buf, line_buf};
+
+let mut ecran = St7789vBuffered::new(St7789v::new(spi_device, broche_dc, broche_rst));
+ecran.driver().init().await.unwrap();
+
+loop {
+    ecran.fill_screen_buf(Color::BLACK);
+
+    {
+        let mut gfx = GraphicsBuffered::new(&mut ecran);
+        line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
+        circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
+        fill_triangle_buf(&mut gfx, 120, 10, 20, 310, 220, 310, Color::YELLOW);
+    } // ← borrow libéré
+
+    ecran.draw_str_buf(8, 8, b"BONJOUR", Color::WHITE, Color::BLACK);
+    ecran.flush().await.unwrap(); // envoi unique → pas de clignotement
+}
+```
+
+---
 
 ## Sans broche RST
 
 ```rust
 let mut ecran = St7789v::new_no_rst(spi_device, broche_dc);
-// ...
 let mut gfx = Graphics::new_no_rst(&mut ecran);
+
+// Framebuffer sans RST
+let mut ecran = St7789vBuffered::new(St7789v::new_no_rst(spi_device, broche_dc));
+let mut gfx = GraphicsBuffered::new_no_rst(&mut ecran);
 ```
+
+---
 
 ## Licence
 

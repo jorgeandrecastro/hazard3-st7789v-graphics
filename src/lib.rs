@@ -18,37 +18,51 @@
 //! Ce crate **ne duplique rien**. Il ajoute uniquement les primitives
 //! géométriques que le driver ne propose pas :
 //!
-//! | Fonction          | Algorithme                      |
-//! |-------------------|---------------------------------|
-//! | [`line()`]          | Bresenham integer-only          |
-//! | [`circle()`]        | Midpoint integer-only           |
-//! | [`fill_circle()`]   | Midpoint + hlines               |
-//! | [`triangle()`]      | 3 appels à [`line()`]           |
-//! | [`fill_triangle`] | Scanline integer-only           |
-//! | [`ellipse`]       | Midpoint généralisé             |
-//! | [`bezier_quad`]   | De Casteljau integer-only       |
+//! | Fonction             | Algorithme                    | Direct SPI | Framebuffer |
+//! |----------------------|-------------------------------|:----------:|:-----------:|
+//! | [`line()`]           | Bresenham integer-only        | ✓ async    | ✓ sync      |
+//! | [`circle()`]         | Midpoint integer-only         | ✓ async    | ✓ sync      |
+//! | [`fill_circle()`]    | Midpoint + hlines             | ✓ async    | ✓ sync      |
+//! | [`triangle()`]       | 3 appels à [`line()`]         | ✓ async    | ✓ sync      |
+//! | [`fill_triangle()`]  | Scanline integer-only         | ✓ async    | ✓ sync      |
+//! | [`ellipse()`]        | Midpoint généralisé           | ✓ async    | ✓ sync      |
+//! | [`bezier_quad()`]    | De Casteljau integer-only     | ✓ async    | ✓ sync      |
+//!
+//! ## Deux modes d'utilisation
+//!
+//! ### Mode direct SPI — [`Graphics`]
+//!
+//! Chaque primitive envoie les pixels immédiatement via SPI.
+//! Simple, mais peut produire un clignotement si l'écran est redessiné fréquemment.
+//!
+//! ### Mode framebuffer — [`GraphicsBuffered`]
+//!
+//! Toutes les primitives écrivent en RAM (synchrones, sans `.await`).
+//! Un seul appel [`St7789vBuffered::flush`] envoie tout d'un coup — **zéro clignotement**.
+//! Nécessite [`St7789vBuffered`] du crate `embassy-st7789v` (150 Ko RAM).
 //!
 //! ## Architecture
 //!
 //! ```text
-//! ┌──────────────────────────────────────────────────┐
-//! │               Votre application                  │
-//! │  line() / circle() / triangle() …               │
-//! │  ecran.draw_str() / ecran.draw_f32() …          │  ← driver direct pour le texte
-//! └──────────┬───────────────────────────────────────┘
-//!            │ &mut Graphics
-//! ┌──────────▼──────────────────┐
-//! │  Graphics (ce crate)        │
-//! │  clipping · pixel() async   │
-//! └──────────┬──────────────────┘
-//!            │ draw_pixel() async
-//! ┌──────────▼──────────────────────────────────────┐
-//! │     embassy-st7789v (driver)                    │
-//! │  framebuffer SPI · RAMWR · fill_rect() …       │
-//! └─────────────────────────────────────────────────┘
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                      Votre application                          │
+//! │  line() / circle() / triangle() …        (async, direct SPI)   │
+//! │  line_buf() / circle_buf() / … + flush() (sync,  framebuffer)  │
+//! │  ecran.draw_str() / ecran.draw_f32() …   (driver direct)       │
+//! └──────────┬──────────────────────────┬────────────────────────────┘
+//!            │ &mut Graphics             │ &mut GraphicsBuffered
+//! ┌──────────▼──────────────┐  ┌────────▼────────────────────┐
+//! │  Graphics               │  │  GraphicsBuffered           │
+//! │  clipping · pixel async │  │  clipping · pixel sync RAM  │
+//! └──────────┬──────────────┘  └────────┬────────────────────┘
+//!            │ draw_pixel() async        │ set_pixel() / fill_rect_buf()
+//! ┌──────────▼──────────────┐  ┌────────▼────────────────────┐
+//! │  St7789v (driver)       │  │  St7789vBuffered            │
+//! │  SPI · RAMWR direct     │  │  RAM [u8; 153600] + flush() │
+//! └─────────────────────────┘  └─────────────────────────────┘
 //! ```
 //!
-//! ## Patron de borrow
+//! ## Patron de borrow — mode direct
 //!
 //! `Graphics` tient un `&mut St7789v` pour toute sa durée de vie.
 //! Pour appeler les méthodes du driver directement (texte, remplissage,
@@ -66,14 +80,34 @@
 //! }
 //! ```
 //!
+//! ## Patron de borrow — mode framebuffer
+//!
+//! `GraphicsBuffered` tient un `&mut St7789vBuffered`.
+//! Toutes les primitives `*_buf` sont synchrones.
+//! Appeler `flush()` après avoir libéré `gfx`.
+//!
+//! ```rust,no_run
+//! loop {
+//!     ecran.fill_screen_buf(Color::BLACK);
+//!     {
+//!         let mut gfx = GraphicsBuffered::new(&mut ecran);
+//!         line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
+//!         circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
+//!     } // ← borrow libéré
+//!     ecran.draw_str_buf(8, 10, b"BONJOUR", Color::YELLOW, Color::BLACK);
+//!     ecran.flush().await.unwrap(); // envoi unique → zéro clignotement
+//! }
+//! ```
+//!
 //! ## Note sur les erreurs SPI
 //!
 //! Les fonctions de ce crate ignorent silencieusement les erreurs SPI
 //! (comme le fait également `embassy-ssd1306-graphics` pour le bus I2C).
 //! Si votre application requiert une gestion d'erreur fine, utilisez
 //! directement `ecran.draw_pixel()`.
+//! Les primitives `*_buf` n'accèdent jamais au SPI :aucune erreur possible.
 
-use embassy_st7789v::{Color, NoPin, St7789v, SCREEN_H, SCREEN_W};
+use embassy_st7789v::{Color, NoPin, St7789v, St7789vBuffered, SCREEN_H, SCREEN_W};
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::spi::SpiDevice;
 
@@ -586,5 +620,225 @@ pub async fn fill_triangle<SPI, DC, RST>(
             x1 + (x2 - x1) * (y - y1) / lower_h
         };
         gfx.hline(xa, xb, y, color).await;
+    }
+
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contexte graphique pour framebuffer
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Contexte graphique pour `St7789vBuffered`.
+///
+/// Identique à [`Graphics`] mais toutes les opérations écrivent dans le
+/// framebuffer RAM via `set_pixel()`. Aucun pixel n'est envoyé à l'écran
+/// avant l'appel à [`St7789vBuffered::flush`].
+///
+/// # Patron d'utilisation
+///
+/// ```rust,no_run
+/// let mut gfx = GraphicsBuffered::new(&mut ecran);
+/// line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
+/// circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
+/// drop(gfx); // libère le borrow
+/// ecran.flush().await.unwrap(); // tout s'affiche d'un coup
+/// ```
+pub struct GraphicsBuffered<'a, SPI, DC, RST = NoPin>
+where
+    SPI: SpiDevice,
+    DC: OutputPin,
+    RST: OutputPin,
+{
+    display: &'a mut St7789vBuffered<SPI, DC, RST>,
+}
+
+impl<'a, SPI, DC> GraphicsBuffered<'a, SPI, DC, NoPin>
+where
+    SPI: SpiDevice,
+    DC: OutputPin,
+{
+    #[inline]
+    pub fn new_no_rst(display: &'a mut St7789vBuffered<SPI, DC, NoPin>) -> Self {
+        Self { display }
+    }
+}
+
+impl<'a, SPI, DC, RST> GraphicsBuffered<'a, SPI, DC, RST>
+where
+    SPI: SpiDevice,
+    DC: OutputPin,
+    RST: OutputPin,
+{
+    #[inline]
+    pub fn new(display: &'a mut St7789vBuffered<SPI, DC, RST>) -> Self {
+        Self { display }
+    }
+
+    /// Écrit un pixel dans le framebuffer avec clipping.
+    #[inline(always)]
+    pub fn pixel(&mut self, x: i32, y: i32, color: Color) {
+        if x >= 0 && y >= 0 && x < SCREEN_W as i32 && y < SCREEN_H as i32 {
+            self.display.set_pixel(x as u16, y as u16, color);
+        }
+    }
+
+    /// Ligne horizontale dans le framebuffer (utilisée par fill_circle_buf, fill_triangle_buf).
+    #[inline]
+    fn hline(&mut self, x0: i32, x1: i32, y: i32, color: Color) {
+        if y < 0 || y >= SCREEN_H as i32 { return; }
+        let xa = x0.max(0).min(SCREEN_W as i32 - 1) as u16;
+        let xb = x1.max(0).min(SCREEN_W as i32 - 1) as u16;
+        let (xa, xb) = if xa <= xb { (xa, xb) } else { (xb, xa) };
+        self.display.fill_rect_buf(xa, y as u16, xb, y as u16, color);
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Primitives framebuffer (synchrones)
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn line_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    mut x0: i32, mut y0: i32,
+    x1: i32, y1: i32,
+    color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    loop {
+        gfx.pixel(x0, y0, color);
+        if x0 == x1 && y0 == y1 { break; }
+        let e2 = 2 * err;
+        if e2 >= dy { err += dy; x0 += sx; }
+        if e2 <= dx { err += dx; y0 += sy; }
+    }
+}
+
+pub fn circle_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    cx: i32, cy: i32, r: i32, color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    if r <= 0 { gfx.pixel(cx, cy, color); return; }
+    let mut x = r; let mut y = 0; let mut err = 0;
+    while x >= y {
+        gfx.pixel(cx + x, cy + y, color); gfx.pixel(cx + y, cy + x, color);
+        gfx.pixel(cx - y, cy + x, color); gfx.pixel(cx - x, cy + y, color);
+        gfx.pixel(cx - x, cy - y, color); gfx.pixel(cx - y, cy - x, color);
+        gfx.pixel(cx + y, cy - x, color); gfx.pixel(cx + x, cy - y, color);
+        y += 1;
+        if err <= 0 { err += 2 * y + 1; }
+        else { x -= 1; err += 2 * (y - x) + 1; }
+    }
+}
+
+pub fn fill_circle_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    cx: i32, cy: i32, r: i32, color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    if r <= 0 { gfx.pixel(cx, cy, color); return; }
+    let mut x = r; let mut y = 0; let mut err = 0;
+    while x >= y {
+        gfx.hline(cx - x, cx + x, cy + y, color);
+        gfx.hline(cx - x, cx + x, cy - y, color);
+        gfx.hline(cx - y, cx + y, cy + x, color);
+        gfx.hline(cx - y, cx + y, cy - x, color);
+        y += 1;
+        if err <= 0 { err += 2 * y + 1; }
+        else { x -= 1; err += 2 * (y - x) + 1; }
+    }
+}
+
+pub fn triangle_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32, color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    line_buf(gfx, x0, y0, x1, y1, color);
+    line_buf(gfx, x1, y1, x2, y2, color);
+    line_buf(gfx, x2, y2, x0, y0, color);
+}
+
+pub fn fill_triangle_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    x0: i32, mut y0: i32,
+    x1: i32, mut y1: i32,
+    x2: i32, mut y2: i32,
+    color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    let (mut x0, mut x1, mut x2) = (x0, x1, x2);
+    if y0 > y1 { core::mem::swap(&mut y0, &mut y1); core::mem::swap(&mut x0, &mut x1); }
+    if y1 > y2 { core::mem::swap(&mut y1, &mut y2); core::mem::swap(&mut x1, &mut x2); }
+    if y0 > y1 { core::mem::swap(&mut y0, &mut y1); core::mem::swap(&mut x0, &mut x1); }
+    let total_h = y2 - y0;
+    if total_h == 0 {
+        gfx.hline(x0.min(x1).min(x2), x0.max(x1).max(x2), y0, color);
+        return;
+    }
+    let upper_h = y1 - y0;
+    let lower_h = y2 - y1;
+    for y in y0..=y1 {
+        let dy = y - y0;
+        let xa = x0 + (x2 - x0) * dy / total_h;
+        let xb = if upper_h == 0 { x1 } else { x0 + (x1 - x0) * dy / upper_h };
+        gfx.hline(xa, xb, y, color);
+    }
+    for y in y1..=y2 {
+        let dy = y - y0;
+        let xa = x0 + (x2 - x0) * dy / total_h;
+        let xb = if lower_h == 0 { x1 } else { x1 + (x2 - x1) * (y - y1) / lower_h };
+        gfx.hline(xa, xb, y, color);
+    }
+}
+
+pub fn ellipse_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    cx: i32, cy: i32, rx: i32, ry: i32, color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    if rx <= 0 || ry <= 0 { gfx.pixel(cx, cy, color); return; }
+    let rx2 = rx * rx; let ry2 = ry * ry;
+    let mut x = 0i32; let mut y = ry;
+    let mut d1 = ry2 - rx2 * ry + rx2 / 4;
+    let mut dx = 2 * ry2 * x; let mut dy = 2 * rx2 * y;
+    while dx < dy {
+        gfx.pixel(cx + x, cy + y, color); gfx.pixel(cx - x, cy + y, color);
+        gfx.pixel(cx + x, cy - y, color); gfx.pixel(cx - x, cy - y, color);
+        x += 1; dx += 2 * ry2;
+        if d1 < 0 { d1 += dx + ry2; }
+        else { y -= 1; dy -= 2 * rx2; d1 += dx - dy + ry2; }
+    }
+    let mut d2 = ry2 * (x * x + x) + rx2 * (y * y - 2 * y + 1) - rx2 * ry2 + rx2;
+    while y >= 0 {
+        gfx.pixel(cx + x, cy + y, color); gfx.pixel(cx - x, cy + y, color);
+        gfx.pixel(cx + x, cy - y, color); gfx.pixel(cx - x, cy - y, color);
+        y -= 1; dy -= 2 * rx2;
+        if d2 > 0 { d2 += rx2 - dy; }
+        else { x += 1; dx += 2 * ry2; d2 += dx - dy + rx2; }
+    }
+}
+
+pub fn bezier_quad_buf<SPI, DC, RST>(
+    gfx: &mut GraphicsBuffered<'_, SPI, DC, RST>,
+    x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32,
+    steps: i32, color: Color,
+) where SPI: SpiDevice, DC: OutputPin, RST: OutputPin,
+{
+    if steps <= 0 { return; }
+    let mut px = x0; let mut py = y0;
+    for i in 1..=steps {
+        let t = (i * 1024) / steps;
+        let t1 = 1024 - t;
+        let nx = (t1 * t1 * x0 + 2 * t1 * t * x1 + t * t * x2) / (1024 * 1024);
+        let ny = (t1 * t1 * y0 + 2 * t1 * t * y1 + t * t * y2) / (1024 * 1024);
+        line_buf(gfx, px, py, nx, ny, color);
+        px = nx; py = ny;
     }
 }
