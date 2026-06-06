@@ -4,6 +4,8 @@ Toutes les modifications notables de ce projet sont documentées ici.
 Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
 ---
+## [0.2.1]-2026 
+Mise à jour de embassy-st7789v v0.3.0
 
 ## [0.2.0] — 2026
 

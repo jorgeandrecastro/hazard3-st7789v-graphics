@@ -43,7 +43,7 @@ Nécessite `St7789vBuffered` du crate `embassy-st7789v` (150 Ko RAM).
 
 ```toml
 [dependencies]
-embassy-st7789v          = "0.2"
+embassy-st7789v          = "0.3"
 embassy-st7789v-graphics = "0.2"
 ```
 
