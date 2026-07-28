@@ -4,8 +4,11 @@ Toutes les modifications notables de ce projet sont documentées ici.
 Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
 ---
-## [0.2.1]-2026 
-Mise à jour de embassy-st7789v v0.3.0
+## [0.3.0] — 2026
+
+### Modifié
+- Mise à jour de la dépendance `embassy-st7789v` vers la version 0.4.0
+- Aucun changement d’API pour cette crate
 
 ## [0.2.0] — 2026
 
