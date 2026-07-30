@@ -11,7 +11,7 @@
 //! - `draw_pixel()`, `draw_hline()`, `draw_vline()`
 //! - `draw_rect()`, `fill_rect()`, `fill_screen()`
 //! - `draw_char()`, `draw_str()`, `draw_i16()`, `draw_u32()`, `draw_f32()`
-//! - `draw_char_scaled()`, `draw_str_scaled()`
+//! - `draw_char_scaled()`, `draw_str_scaled()`, `draw_str_scaled_buf()`, `draw_char_scaled_buf()`
 //! - `draw_bitmap()`
 //! - `set_orientation()`, `set_invert()`
 //!
@@ -41,6 +41,14 @@
 //! Un seul appel [`St7789vBuffered::flush`] envoie tout d'un coup — **zéro clignotement**.
 //! Nécessite [`St7789vBuffered`] du crate `embassy-st7789v` (150 Ko RAM).
 //!
+//! Les constantes mathématiques et géométriques
+//! [`LAMBDA`], [`THETA`], [`PI`], [`DELTA`], [`DEGREE`], [`PLUS_MINUS`],
+//! [`TIMES`], [`DIVIDE`], [`SQRT`], [`INFINITY`], [`APPROX`], [`LE`] et
+//! [`GE`] sont re-exportées par cette crate, ainsi que les types de base
+//! comme [`Color`], [`St7789v`] et [`St7789vBuffered`]. Vous pouvez donc
+//! les importer directement depuis [`embassy_st7789v_graphics`](crate) sans
+//! passer par `embassy-st7789v`.
+//!
 //! ## Architecture
 //!
 //! ```text
@@ -62,7 +70,7 @@
 //! └─────────────────────────┘  └─────────────────────────────┘
 //! ```
 //!
-//! ## Patron de borrow — mode direct
+//! ## Patron de borrow  mode direct
 //!
 //! `Graphics` tient un `&mut St7789v` pour toute sa durée de vie.
 //! Pour appeler les méthodes du driver directement (texte, remplissage,
@@ -80,7 +88,7 @@
 //! }
 //! ```
 //!
-//! ## Patron de borrow — mode framebuffer
+//! ## Patron de borrow  mode framebuffer
 //!
 //! `GraphicsBuffered` tient un `&mut St7789vBuffered`.
 //! Toutes les primitives `*_buf` sont synchrones.
@@ -108,6 +116,9 @@
 //! Les primitives `*_buf` n'accèdent jamais au SPI :aucune erreur possible.
 
 use embassy_st7789v::{Color, NoPin, St7789v, St7789vBuffered, SCREEN_H, SCREEN_W};
+pub use embassy_st7789v::{
+    APPROX, DEGREE, DELTA, DIVIDE, GE, INFINITY, LAMBDA, LE, PI, PLUS_MINUS, SQRT, THETA, TIMES,
+};
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::spi::SpiDevice;
 
@@ -126,8 +137,12 @@ use embedded_hal_async::spi::SpiDevice;
 /// # Construction
 ///
 /// ```rust,no_run
-/// let mut gfx = Graphics::new(&mut ecran);
-/// line(&mut gfx, 0, 0, 239, 319, Color::RED).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, line};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     line(&mut gfx, 0, 0, 239, 319, Color::RED).await;
+/// # }
 /// ```
 ///
 /// Utilisez [`Graphics::new_no_rst`] si votre `St7789v` a été construit
@@ -213,8 +228,13 @@ where
 /// # Exemple
 ///
 /// ```rust,no_run
-/// line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;  // diagonale complète
-/// line(&mut gfx, 0, 0, 239, 319, Color::BLACK).await;  // efface la diagonale
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, line};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;  // diagonale complète
+///     line(&mut gfx, 0, 0, 239, 319, Color::BLACK).await;  // efface la diagonale
+/// # }
 /// ```
 pub async fn line<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -270,7 +290,12 @@ pub async fn line<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// circle(&mut gfx, 120, 160, 60, Color::CYAN).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, circle};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     circle(&mut gfx, 120, 160, 60, Color::CYAN).await;
+/// # }
 /// ```
 pub async fn circle<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -321,7 +346,12 @@ pub async fn circle<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// fill_circle(&mut gfx, 120, 160, 50, Color::BLUE).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, fill_circle};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     fill_circle(&mut gfx, 120, 160, 50, Color::BLUE).await;
+/// # }
 /// ```
 pub async fn fill_circle<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -369,7 +399,12 @@ pub async fn fill_circle<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::GREEN).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, triangle};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::GREEN).await;
+/// # }
 /// ```
 pub async fn triangle<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -409,8 +444,13 @@ pub async fn triangle<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// ellipse(&mut gfx, 120, 160, 100, 60, Color::MAGENTA).await; // ellipse large
-/// ellipse(&mut gfx, 120, 160, 40, 40, Color::WHITE).await;    // cercle (rx == ry)
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, ellipse};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     ellipse(&mut gfx, 120, 160, 100, 60, Color::MAGENTA).await; // ellipse large
+///     ellipse(&mut gfx, 120, 160, 40, 40, Color::WHITE).await;    // cercle (rx == ry)
+/// # }
 /// ```
 pub async fn ellipse<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -501,8 +541,13 @@ pub async fn ellipse<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// // Arche : point de contrôle en haut au centre
-/// bezier_quad(&mut gfx, 10, 280, 120, 40, 230, 280, 24, Color::ORANGE).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, bezier_quad};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     // Arche : point de contrôle en haut au centre
+///     bezier_quad(&mut gfx, 10, 280, 120, 40, 230, 280, 24, Color::ORANGE).await;
+/// # }
 /// ```
 pub async fn bezier_quad<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -555,7 +600,12 @@ pub async fn bezier_quad<SPI, DC, RST>(
 /// # Exemple
 ///
 /// ```rust,no_run
-/// fill_triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::YELLOW).await;
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, fill_triangle};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = Graphics::new(&mut ecran);
+///     fill_triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::YELLOW).await;
+/// # }
 /// ```
 pub async fn fill_triangle<SPI, DC, RST>(
     gfx: &mut Graphics<'_, SPI, DC, RST>,
@@ -637,11 +687,15 @@ pub async fn fill_triangle<SPI, DC, RST>(
 /// # Patron d'utilisation
 ///
 /// ```rust,no_run
-/// let mut gfx = GraphicsBuffered::new(&mut ecran);
-/// line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
-/// circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
-/// drop(gfx); // libère le borrow
-/// ecran.flush().await.unwrap(); // tout s'affiche d'un coup
+/// # async fn demo() {
+/// #     use embassy_st7789v_graphics::{Color, GraphicsBuffered, St7789vBuffered, line_buf, circle_buf};
+/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789vBuffered<_, _, _>>::zeroed().assume_init() };
+/// #     let mut gfx = GraphicsBuffered::new(&mut ecran);
+///     line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
+///     circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
+///     drop(gfx); // libère le borrow
+///     ecran.flush().await.unwrap(); // tout s'affiche d'un coup
+/// # }
 /// ```
 pub struct GraphicsBuffered<'a, SPI, DC, RST = NoPin>
 where

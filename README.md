@@ -3,9 +3,9 @@
 Couche graphique 2D `no_std` pour écrans TFT LCD **ST7789V 240×320**,
 construite au-dessus de [`embassy-st7789v`](https://crates.io/crates/embassy-st7789v).
 
-## Fonctionnalités nouvelles : Version 0.3.0 mise à jour de embassy-st7789v vers 0.4.0 (voir CHANGELOG.md)
+## Fonctionnalités nouvelles : Version 0.4.0 (voir CHANGELOG.md)
 
-Cette version met à jour la dépendance `embassy-st7789v` vers la version 0.4.0 sans changer l’API de cette crate.
+Cette version re-exporte directement depuis `embassy-st7789v-graphics` les constantes mathématiques et géométriques `LAMBDA`, `THETA`, `PI`, `DELTA`, `DEGREE`, `PLUS_MINUS`, `TIMES`, `DIVIDE`, `SQRT`, `INFINITY`, `APPROX`, `LE` et `GE`, et met à jour la dépendance `embassy-st7789v` vers la version 0.5.
 
 | Fonction               | Algorithme                  | Direct SPI | Framebuffer |
 |------------------------|-----------------------------|:----------:|:-----------:|
@@ -45,15 +45,18 @@ Nécessite `St7789vBuffered` du crate `embassy-st7789v` (150 Ko RAM).
 
 ```toml
 [dependencies]
-embassy-st7789v          = "0.4"
-embassy-st7789v-graphics = "0.3"
+embassy-st7789v          = "0.5"
+embassy-st7789v-graphics = "0.4"
 ```
 
 ### Mode direct (async)
 
+Les constantes mathématiques et géométriques `LAMBDA`, `THETA`, `PI`, `DELTA`, `DEGREE`, `PLUS_MINUS`, `TIMES`, `DIVIDE`, `SQRT`, `INFINITY`, `APPROX`, `LE` et `GE` sont désormais re-exportées par `embassy-st7789v-graphics`, donc vous pouvez les importer directement depuis cette crate.
+
 ```rust
-use embassy_st7789v::{Color, St7789v};
-use embassy_st7789v_graphics::{Graphics, circle, fill_triangle, line};
+use embassy_st7789v_graphics::{
+    circle, fill_triangle, line, Color, Graphics, St7789v, PI, DEGREE,
+};
 
 let mut ecran = St7789v::new(spi_device, broche_dc, broche_rst);
 ecran.init().await.unwrap();
@@ -72,8 +75,10 @@ ecran.draw_str(8, 8, b"BONJOUR", Color::WHITE, Color::BLACK).await.unwrap();
 ### Mode framebuffer (sync + flush) : zéro clignotement
 
 ```rust
-use embassy_st7789v::{Color, St7789v, St7789vBuffered};
-use embassy_st7789v_graphics::{GraphicsBuffered, circle_buf, fill_triangle_buf, line_buf};
+use embassy_st7789v_graphics::{
+    circle_buf, fill_triangle_buf, line_buf, Color, GraphicsBuffered, St7789v,
+    St7789vBuffered, PI, DEGREE,
+};
 
 let mut ecran = St7789vBuffered::new(St7789v::new(spi_device, broche_dc, broche_rst));
 ecran.driver().init().await.unwrap();

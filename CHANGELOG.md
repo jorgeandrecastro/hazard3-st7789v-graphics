@@ -4,6 +4,16 @@ Toutes les modifications notables de ce projet sont documentées ici.
 Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
 
 ---
+## [0.4.0] — 2026
+
+### Ajouté
+- Re-export des constantes mathématiques et géométriques depuis la crate graphique :
+  - `LAMBDA`, `THETA`, `PI`, `DELTA`, `DEGREE`, `PLUS_MINUS`, `TIMES`, `DIVIDE`, `SQRT`, `INFINITY`, `APPROX`, `LE`, `GE`
+- Documentation et exemples mis à jour pour importer ces symboles directement depuis `embassy_st7789v_graphics`
+
+### Modifié
+- Mise à jour de la dépendance `embassy-st7789v` vers la version 0.5
+
 ## [0.3.0] — 2026
 
 ### Modifié
