@@ -25,7 +25,7 @@ categories = [
     "hardware-support",
 ]
 license = "GPL-2.0-or-later"
-repository = "https://github.com/jorgeandrecastro/embassy-st7789v"
+repository = "https://github.com/jorgeandrecastro/embassy-st7789v-graphics"
 
 [lib]
 name = "embassy_st7789v_graphics"
