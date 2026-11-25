@@ -1,13 +1,17 @@
 #![no_std]
 #![forbid(unsafe_code)]
-//! # embassy-st7789v-graphics
+//! # hazard3-st7789v-graphics
 //!
-//! Couche graphique 2D `no_std` pour écrans TFT LCD ST7789V 240×320,
-//! construite au-dessus de [`embassy-st7789v`](https://docs.rs/embassy-st7789v).
+//! A `no_std` 2D graphics layer for ST7789V 240×320 TFT LCD displays,
+//! built on [`hazard3-st7789v`](https://docs.rs/hazard3-st7789v)
+//! in the independent [Hazard3 Async](https://github.com/jorgeandrecastro/hazard3-async) ecosystem.
+//! The `time-hazard3` time backend is enabled by default; to use upstream
+//! Embassy, disable default features and enable `time-upstream`.
+//! Exactly one backend must be enabled.
 //!
-//! ## Rôle exact de ce crate
+//! ## Role of this crate
 //!
-//! Le driver `embassy-st7789v` fournit déjà :
+//! The `hazard3-st7789v` driver already provides:
 //! - `draw_pixel()`, `draw_hline()`, `draw_vline()`
 //! - `draw_rect()`, `fill_rect()`, `fill_screen()`
 //! - `draw_char()`, `draw_str()`, `draw_i16()`, `draw_u32()`, `draw_f32()`
@@ -15,48 +19,49 @@
 //! - `draw_bitmap()`
 //! - `set_orientation()`, `set_invert()`
 //!
-//! Ce crate **ne duplique rien**. Il ajoute uniquement les primitives
-//! géométriques que le driver ne propose pas :
+//! This crate **does not duplicate these**. It only adds geometric
+//! primitives that the driver does not provide:
 //!
-//! | Fonction             | Algorithme                    | Direct SPI | Framebuffer |
+//! | Function             | Algorithm                     | Direct SPI | Framebuffer |
 //! |----------------------|-------------------------------|:----------:|:-----------:|
 //! | [`line()`]           | Bresenham integer-only        | ✓ async    | ✓ sync      |
 //! | [`circle()`]         | Midpoint integer-only         | ✓ async    | ✓ sync      |
 //! | [`fill_circle()`]    | Midpoint + hlines             | ✓ async    | ✓ sync      |
-//! | [`triangle()`]       | 3 appels à [`line()`]         | ✓ async    | ✓ sync      |
+//! | [`triangle()`]       | 3 calls to [`line()`]         | ✓ async    | ✓ sync      |
 //! | [`fill_triangle()`]  | Scanline integer-only         | ✓ async    | ✓ sync      |
-//! | [`ellipse()`]        | Midpoint généralisé           | ✓ async    | ✓ sync      |
+//! | [`ellipse()`]        | Generalized midpoint          | ✓ async    | ✓ sync      |
 //! | [`bezier_quad()`]    | De Casteljau integer-only     | ✓ async    | ✓ sync      |
 //!
-//! ## Deux modes d'utilisation
+//! ## Two usage modes
 //!
-//! ### Mode direct SPI — [`Graphics`]
+//! ### Direct SPI mode — [`Graphics`]
 //!
-//! Chaque primitive envoie les pixels immédiatement via SPI.
-//! Simple, mais peut produire un clignotement si l'écran est redessiné fréquemment.
+//! Each primitive sends pixels immediately over SPI.
+//! This is simple, but may cause flicker if the display is redrawn frequently.
 //!
-//! ### Mode framebuffer — [`GraphicsBuffered`]
+//! ### Framebuffer mode — [`GraphicsBuffered`]
 //!
-//! Toutes les primitives écrivent en RAM (synchrones, sans `.await`).
-//! Un seul appel [`St7789vBuffered::flush`] envoie tout d'un coup — **zéro clignotement**.
-//! Nécessite [`St7789vBuffered`] du crate `embassy-st7789v` (150 Ko RAM).
+//! All primitives write to RAM (synchronously, without `.await`).
+//! A [`St7789vBuffered::flush`] call sends the frame, reducing visible
+//! incremental drawing without guaranteeing tear-free updates.
+//! Requires [`St7789vBuffered`] from `hazard3-st7789v` (150 KiB RAM).
 //!
-//! Les constantes mathématiques et géométriques
+//! The mathematical and geometric constants
 //! [`LAMBDA`], [`THETA`], [`PI`], [`DELTA`], [`DEGREE`], [`PLUS_MINUS`],
-//! [`TIMES`], [`DIVIDE`], [`SQRT`], [`INFINITY`], [`APPROX`], [`LE`] et
-//! [`GE`] sont re-exportées par cette crate, ainsi que les types de base
-//! comme [`Color`], [`St7789v`] et [`St7789vBuffered`]. Vous pouvez donc
-//! les importer directement depuis [`embassy_st7789v_graphics`](crate) sans
-//! passer par `embassy-st7789v`.
+//! [`TIMES`], [`DIVIDE`], [`SQRT`], [`INFINITY`], [`APPROX`], [`LE`] and
+//! [`GE`] are re-exported by this crate, along with basic types such as
+//! [`Color`], [`St7789v`] and [`St7789vBuffered`]. You can therefore import
+//! them directly from [`hazard3_st7789v_graphics`](crate) without importing
+//! `hazard3-st7789v`.
 //!
 //! ## Architecture
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────┐
-//! │                      Votre application                          │
+//! │                      Your application                           │
 //! │  line() / circle() / triangle() …        (async, direct SPI)   │
 //! │  line_buf() / circle_buf() / … + flush() (sync,  framebuffer)  │
-//! │  ecran.draw_str() / ecran.draw_f32() …   (driver direct)       │
+//! │  display.draw_str() / display.draw_f32() …   (driver direct)       │
 //! └──────────┬──────────────────────────┬────────────────────────────┘
 //!            │ &mut Graphics             │ &mut GraphicsBuffered
 //! ┌──────────▼──────────────┐  ┌────────▼────────────────────┐
@@ -70,83 +75,92 @@
 //! └─────────────────────────┘  └─────────────────────────────┘
 //! ```
 //!
-//! ## Patron de borrow  mode direct
+//! ## Borrowing pattern: direct mode
 //!
-//! `Graphics` tient un `&mut St7789v` pour toute sa durée de vie.
-//! Pour appeler les méthodes du driver directement (texte, remplissage,
-//! orientation…), `gfx` doit être sorti de portée au préalable.
+//! `Graphics` holds a `&mut St7789v` for its entire lifetime.
+//! To call driver methods directly (text, fill, orientation, etc.),
+//! `gfx` must first go out of scope.
 //!
 //! ```rust,no_run
+//! # use embedded_hal::digital::OutputPin;
+//! # use embedded_hal_async::spi::SpiDevice;
+//! # use hazard3_st7789v_graphics::{circle, line, Color, Graphics, St7789v};
+//! # async fn demo<SPI: SpiDevice, DC: OutputPin, RST: OutputPin>(mut display: St7789v<SPI, DC, RST>) {
 //! loop {
-//!     ecran.fill_screen(Color::BLACK).await.unwrap();
+//!     display.fill_screen(Color::BLACK).await.unwrap();
 //!     {
-//!         let mut gfx = Graphics::new(&mut ecran);
+//!         let mut gfx = Graphics::new(&mut display);
 //!         line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;
 //!         circle(&mut gfx, 120, 160, 60, Color::CYAN).await;
-//!     } // ← borrow libéré
-//!     ecran.draw_str(8, 10, b"BONJOUR", Color::YELLOW, Color::BLACK).await.unwrap();
+//!     } // ← borrow released
+//!     display.draw_str(8, 10, b"HELLO", Color::YELLOW, Color::BLACK).await.unwrap();
 //! }
+//! # }
 //! ```
 //!
-//! ## Patron de borrow  mode framebuffer
+//! ## Borrowing pattern: framebuffer mode
 //!
-//! `GraphicsBuffered` tient un `&mut St7789vBuffered`.
-//! Toutes les primitives `*_buf` sont synchrones.
-//! Appeler `flush()` après avoir libéré `gfx`.
+//! `GraphicsBuffered` holds a `&mut St7789vBuffered`.
+//! All `*_buf` primitives are synchronous.
+//! Call `flush()` after releasing `gfx`.
 //!
 //! ```rust,no_run
+//! # use embedded_hal::digital::OutputPin;
+//! # use embedded_hal_async::spi::SpiDevice;
+//! # use hazard3_st7789v_graphics::{circle_buf, line_buf, Color, GraphicsBuffered, St7789vBuffered};
+//! # async fn demo<SPI: SpiDevice, DC: OutputPin, RST: OutputPin>(mut display: St7789vBuffered<SPI, DC, RST>) {
 //! loop {
-//!     ecran.fill_screen_buf(Color::BLACK);
+//!     display.fill_screen_buf(Color::BLACK);
 //!     {
-//!         let mut gfx = GraphicsBuffered::new(&mut ecran);
+//!         let mut gfx = GraphicsBuffered::new(&mut display);
 //!         line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
 //!         circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
-//!     } // ← borrow libéré
-//!     ecran.draw_str_buf(8, 10, b"BONJOUR", Color::YELLOW, Color::BLACK);
-//!     ecran.flush().await.unwrap(); // envoi unique → zéro clignotement
+//!     } // ← borrow released
+//!     display.draw_str_buf(8, 10, b"HELLO", Color::YELLOW, Color::BLACK);
+//!     display.flush().await.unwrap();
 //! }
+//! # }
 //! ```
 //!
-//! ## Note sur les erreurs SPI
+//! ## Note on SPI errors
 //!
-//! Les fonctions de ce crate ignorent silencieusement les erreurs SPI
-//! (comme le fait également `embassy-ssd1306-graphics` pour le bus I2C).
-//! Si votre application requiert une gestion d'erreur fine, utilisez
-//! directement `ecran.draw_pixel()`.
-//! Les primitives `*_buf` n'accèdent jamais au SPI :aucune erreur possible.
+//! The functions in this crate silently ignore SPI errors.
+//! If your application requires detailed error handling, use
+//! `display.draw_pixel()` directly.
+//! The `*_buf` primitives never access SPI, so SPI errors are not possible.
 
-use embassy_st7789v::{Color, NoPin, St7789v, St7789vBuffered, SCREEN_H, SCREEN_W};
-pub use embassy_st7789v::{
-    APPROX, DEGREE, DELTA, DIVIDE, GE, INFINITY, LAMBDA, LE, PI, PLUS_MINUS, SQRT, THETA, TIMES,
-};
 use embedded_hal::digital::OutputPin;
 use embedded_hal_async::spi::SpiDevice;
+pub use hazard3_st7789v::{
+    APPROX, Color, DEGREE, DELTA, DIVIDE, GE, INFINITY, LAMBDA, LE, NoPin, PI, PLUS_MINUS,
+    SCREEN_H, SCREEN_W, SQRT, St7789v, St7789vBuffered, THETA, TIMES,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Contexte graphique
+// Graphics context
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Contexte graphique pour le ST7789V 240×320.
+/// Graphics context for the ST7789V 240×320.
 ///
-/// Wraps un `&mut St7789v<SPI, DC, RST>` pour :
-/// - centraliser le **clipping** des coordonnées signées
-/// - fournir un `pixel()` async en `i32` aux algorithmes Bresenham / midpoint
+/// Wraps a `&mut St7789v<SPI, DC, RST>` to:
+/// - centralize **clipping** of signed coordinates
+/// - provide an async `pixel()` with `i32` coordinates for Bresenham / midpoint algorithms
 ///
-/// Le driver reste propriétaire du bus SPI et des broches.
+/// The driver retains ownership of the SPI bus and pins.
 ///
 /// # Construction
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, line};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, line};
+
+/// #     let mut gfx = Graphics::new(&mut display);
 ///     line(&mut gfx, 0, 0, 239, 319, Color::RED).await;
 /// # }
 /// ```
 ///
-/// Utilisez [`Graphics::new_no_rst`] si votre `St7789v` a été construit
-/// avec [`St7789v::new_no_rst`].
+/// Use [`Graphics::new_no_rst`] if your `St7789v` was constructed
+/// with [`St7789v::new_no_rst`].
 pub struct Graphics<'a, SPI, DC, RST = NoPin>
 where
     SPI: SpiDevice,
@@ -156,21 +170,21 @@ where
     display: &'a mut St7789v<SPI, DC, RST>,
 }
 
-// ── Constructeur sans RST ─────────────────────────────────────────────────────
+// ── Constructor without RST ────────────────────────────────────────────────────
 
 impl<'a, SPI, DC> Graphics<'a, SPI, DC, NoPin>
 where
     SPI: SpiDevice,
     DC: OutputPin,
 {
-    /// Crée un contexte graphique pour un `St7789v` sans broche RST.
+    /// Creates a graphics context for an `St7789v` without an RST pin.
     #[inline]
     pub fn new_no_rst(display: &'a mut St7789v<SPI, DC, NoPin>) -> Self {
         Self { display }
     }
 }
 
-// ── Constructeur avec RST ─────────────────────────────────────────────────────
+// ── Constructor with RST ──────────────────────────────────────────────────────
 
 impl<'a, SPI, DC, RST> Graphics<'a, SPI, DC, RST>
 where
@@ -178,19 +192,19 @@ where
     DC: OutputPin,
     RST: OutputPin,
 {
-    /// Crée un contexte graphique pour un `St7789v` avec broche RST matérielle.
+    /// Creates a graphics context for an `St7789v` with a hardware RST pin.
     #[inline]
     pub fn new(display: &'a mut St7789v<SPI, DC, RST>) -> Self {
         Self { display }
     }
 
-    /// Dessine un pixel avec clipping automatique.
+    /// Draws a pixel with automatic clipping.
     ///
-    /// Les coordonnées négatives ou hors de `[0, 240[` × `[0, 320[`
-    /// sont silencieusement ignorées : aucun panic, aucun wrapping.
+    /// Negative coordinates or coordinates outside `[0, 240)` × `[0, 320)`
+    /// are silently ignored: no panic or wrapping.
     ///
-    /// Les erreurs SPI sont ignorées (cohérent avec l'usage dans les
-    /// algorithmes géométriques qui tracent des milliers de pixels).
+    /// SPI errors are ignored (consistent with use in geometric algorithms
+    /// that draw thousands of pixels).
     #[inline(always)]
     pub async fn pixel(&mut self, x: i32, y: i32, color: Color) {
         if x >= 0 && y >= 0 && x < SCREEN_W as i32 && y < SCREEN_H as i32 {
@@ -198,9 +212,9 @@ where
         }
     }
 
-    /// Dessine une ligne horizontale interne (utilisée par les algorithmes de remplissage).
+    /// Draws an internal horizontal line (used by fill algorithms).
     ///
-    /// Effectue le clipping vertical puis délègue à `fill_rect`.
+    /// Clips vertically and then delegates to `fill_rect`.
     #[inline]
     async fn hline(&mut self, x0: i32, x1: i32, y: i32, color: Color) {
         if y < 0 || y >= SCREEN_H as i32 {
@@ -217,23 +231,23 @@ where
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ligne Bresenham
+// Bresenham line
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Trace une ligne entre `(x0, y0)` et `(x1, y1)`.
+/// Draws a line between `(x0, y0)` and `(x1, y1)`.
 ///
-/// **Algorithme :** Bresenham integer-only.  
-/// Zéro division flottante, zéro multiplication, sûr sur tout MCU sans FPU.
+/// **Algorithm:** integer-only Bresenham.
+/// No floating-point division or multiplication; safe on any MCU without an FPU.
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, line};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
-///     line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;  // diagonale complète
-///     line(&mut gfx, 0, 0, 239, 319, Color::BLACK).await;  // efface la diagonale
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, line};
+
+/// #     let mut gfx = Graphics::new(&mut display);
+///     line(&mut gfx, 0, 0, 239, 319, Color::WHITE).await;  // full diagonal
+///     line(&mut gfx, 0, 0, 239, 319, Color::BLACK).await;  // erase the diagonal
 /// # }
 /// ```
 pub async fn line<SPI, DC, RST>(
@@ -272,28 +286,28 @@ pub async fn line<SPI, DC, RST>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cercle midpoint
+// Midpoint circle
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Trace le **contour** d'un cercle.
+/// Draws the **outline** of a circle.
 ///
-/// **Algorithme :** midpoint circle integer-only.  
-/// Exploite la symétrie 8-octants : chaque itération dessine 8 pixels
-/// symétriques, ce qui minimise le nombre d'appels à `pixel()`.
+/// **Algorithm:** integer-only midpoint circle.
+/// Uses 8-octant symmetry: each iteration draws 8 symmetric pixels,
+/// minimizing the number of calls to `pixel()`.
 ///
-/// # Paramètres
+/// # Parameters
 ///
-/// - `(cx, cy)` : centre
-/// - `r` : rayon en pixels
-/// - `color` : couleur du contour
+/// - `(cx, cy)`: center
+/// - `r`: radius in pixels
+/// - `color`: outline color
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, circle};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, circle};
+
+/// #     let mut gfx = Graphics::new(&mut display);
 ///     circle(&mut gfx, 120, 160, 60, Color::CYAN).await;
 /// # }
 /// ```
@@ -336,20 +350,20 @@ pub async fn circle<SPI, DC, RST>(
     }
 }
 
-/// **Remplit** un cercle (disque plein).
+/// **Fills** a circle (solid disk).
 ///
-/// Utilise le même algorithme midpoint, mais dessine des lignes
-/// horizontales entre les points symétriques à chaque rangée.
-/// Beaucoup plus rapide qu'un appel pixel par pixel, car `fill_rect`
-/// envoie les données en bloc via SPI.
+/// Uses the same midpoint algorithm, but draws horizontal lines
+/// between symmetric points on each row.
+/// Much faster than drawing pixel by pixel, because `fill_rect`
+/// sends data in batches over SPI.
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, fill_circle};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, fill_circle};
+
+/// #     let mut gfx = Graphics::new(&mut display);
 ///     fill_circle(&mut gfx, 120, 160, 50, Color::BLUE).await;
 /// # }
 /// ```
@@ -392,17 +406,17 @@ pub async fn fill_circle<SPI, DC, RST>(
 // Triangle
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Trace le **contour** d'un triangle défini par trois sommets.
+/// Draws the **outline** of a triangle defined by three vertices.
 ///
-/// Implémenté comme trois appels à [`line()`], aucune logique propre.
+/// Implemented as three calls to [`line()`], with no additional logic.
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, triangle};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, triangle};
+
+/// #     let mut gfx = Graphics::new(&mut display);
 ///     triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::GREEN).await;
 /// # }
 /// ```
@@ -426,30 +440,30 @@ pub async fn triangle<SPI, DC, RST>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ellipse midpoint généralisé
+// Generalized midpoint ellipse
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Trace le **contour** d'une ellipse.
+/// Draws the **outline** of an ellipse.
 ///
-/// **Algorithme :** midpoint ellipse integer-only (Bresenham généralisé).
-/// Deux phases : région 1 (pente < -1) puis région 2 (pente > -1).
+/// **Algorithm:** integer-only midpoint ellipse (generalized Bresenham).
+/// Two phases: region 1 (slope < -1), then region 2 (slope > -1).
 ///
-/// # Paramètres
+/// # Parameters
 ///
-/// - `(cx, cy)` : centre
-/// - `rx` : demi-axe horizontal en pixels
-/// - `ry` : demi-axe vertical en pixels
-/// - `color` : couleur du contour
+/// - `(cx, cy)`: center
+/// - `rx`: horizontal semi-axis in pixels
+/// - `ry`: vertical semi-axis in pixels
+/// - `color`: outline color
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, ellipse};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
-///     ellipse(&mut gfx, 120, 160, 100, 60, Color::MAGENTA).await; // ellipse large
-///     ellipse(&mut gfx, 120, 160, 40, 40, Color::WHITE).await;    // cercle (rx == ry)
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, ellipse};
+
+/// #     let mut gfx = Graphics::new(&mut display);
+///     ellipse(&mut gfx, 120, 160, 100, 60, Color::MAGENTA).await; // wide ellipse
+///     ellipse(&mut gfx, 120, 160, 40, 40, Color::WHITE).await;    // circle (rx == ry)
 /// # }
 /// ```
 pub async fn ellipse<SPI, DC, RST>(
@@ -475,7 +489,7 @@ pub async fn ellipse<SPI, DC, RST>(
     let mut x = 0i32;
     let mut y = ry;
 
-    // Région 1
+    // Region 1
     let mut d1 = ry2 - rx2 * ry + rx2 / 4;
     let mut dx = 2 * ry2 * x;
     let mut dy = 2 * rx2 * y;
@@ -497,7 +511,7 @@ pub async fn ellipse<SPI, DC, RST>(
         }
     }
 
-    // Région 2
+    // Region 2
     let mut d2 = ry2 * (x * x + x) + rx2 * (y * y - 2 * y + 1) - rx2 * ry2 + rx2;
 
     while y >= 0 {
@@ -519,33 +533,33 @@ pub async fn ellipse<SPI, DC, RST>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Courbe de Bézier quadratique De Casteljau
+// De Casteljau quadratic Bézier curve
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Trace une **courbe de Bézier quadratique** (3 points de contrôle).
+/// Draws a **quadratic Bézier curve** (3 control points).
 ///
-/// **Algorithme :** De Casteljau integer-only avec subdivision fixe.
-/// `steps` contrôle la finesse du tracé (16–32 suffisent pour 240×320).
+/// **Algorithm:** integer-only De Casteljau with fixed subdivision.
+/// `steps` controls the drawing detail (16–32 is enough for 240×320).
 ///
-/// Les interpolations sont effectuées en entiers avec précision ×1024
-/// pour éviter tout calcul flottant.
+/// Interpolation uses integers with ×1024 precision
+/// to avoid floating-point calculations.
 ///
-/// # Paramètres
+/// # Parameters
 ///
-/// - `(x0, y0)` : point de départ
-/// - `(x1, y1)` : point de contrôle
-/// - `(x2, y2)` : point d'arrivée
-/// - `steps` : nombre de segments (recommandé : 16 à 32)
-/// - `color` : couleur de la courbe
+/// - `(x0, y0)`: starting point
+/// - `(x1, y1)`: control point
+/// - `(x2, y2)`: endpoint
+/// - `steps`: number of segments (recommended: 16 to 32)
+/// - `color`: curve color
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, bezier_quad};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
-///     // Arche : point de contrôle en haut au centre
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, bezier_quad};
+
+/// #     let mut gfx = Graphics::new(&mut display);
+///     // Arch: control point at the top center
 ///     bezier_quad(&mut gfx, 10, 280, 120, 40, 230, 280, 24, Color::ORANGE).await;
 /// # }
 /// ```
@@ -572,11 +586,11 @@ pub async fn bezier_quad<SPI, DC, RST>(
     let mut py = y0;
 
     for i in 1..=steps {
-        // t = i / steps en virgule fixe ×1024
+        // t = i / steps in fixed-point ×1024
         let t = (i * 1024) / steps; // t  ∈ [0, 1024]
         let t1 = 1024 - t; // 1-t
 
-        // B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2  (tout ×1024²)
+        // B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2  (all ×1024²)
         let nx = (t1 * t1 * x0 + 2 * t1 * t * x1 + t * t * x2) / (1024 * 1024);
         let ny = (t1 * t1 * y0 + 2 * t1 * t * y1 + t * t * y2) / (1024 * 1024);
 
@@ -587,23 +601,22 @@ pub async fn bezier_quad<SPI, DC, RST>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Triangle plein — scanline
+// Filled triangle — scanline
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// **Remplit** un triangle défini par trois sommets.
+/// **Fills** a triangle defined by three vertices.
 ///
-/// **Algorithme :** scanline : tri des sommets par Y, puis
-/// interpolation linéaire integer-only des bords gauche/droit
-/// à chaque rangée horizontale. Utilise `fill_rect` pour envoyer
-/// chaque ligne en un seul transfert SPI.
+/// **Algorithm:** scanline: sort vertices by Y, then use integer-only
+/// linear interpolation of the left and right edges on each horizontal row.
+/// Uses `fill_rect` to send each line in a single SPI transfer.
 ///
-/// # Exemple
+/// # Example
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, Graphics, St7789v, fill_triangle};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789v<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = Graphics::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789v<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, Graphics, St7789v, fill_triangle};
+
+/// #     let mut gfx = Graphics::new(&mut display);
 ///     fill_triangle(&mut gfx, 120, 10, 20, 310, 220, 310, Color::YELLOW).await;
 /// # }
 /// ```
@@ -621,7 +634,7 @@ pub async fn fill_triangle<SPI, DC, RST>(
     DC: OutputPin,
     RST: OutputPin,
 {
-    // Tri des sommets par Y croissant (bubble sort sur 3 éléments)
+    // Sort vertices by ascending Y (bubble sort on 3 elements)
     let (mut x0, mut x1, mut x2) = (x0, x1, x2);
     if y0 > y1 {
         core::mem::swap(&mut y0, &mut y1);
@@ -638,7 +651,7 @@ pub async fn fill_triangle<SPI, DC, RST>(
 
     let total_h = y2 - y0;
     if total_h == 0 {
-        // Triangle dégénéré : tracer une seule ligne
+        // Degenerate triangle: draw a single line
         let xmin = x0.min(x1).min(x2);
         let xmax = x0.max(x1).max(x2);
         gfx.hline(xmin, xmax, y0, color).await;
@@ -648,7 +661,7 @@ pub async fn fill_triangle<SPI, DC, RST>(
     let upper_h = y1 - y0;
     let lower_h = y2 - y1;
 
-    // Moitié supérieure : y0 → y1
+    // Upper half: y0 → y1
     for y in y0..=y1 {
         let dy = y - y0;
         let xa = x0 + (x2 - x0) * dy / total_h;
@@ -660,7 +673,7 @@ pub async fn fill_triangle<SPI, DC, RST>(
         gfx.hline(xa, xb, y, color).await;
     }
 
-    // Moitié inférieure : y1 → y2
+    // Lower half: y1 → y2
     for y in y1..=y2 {
         let dy = y - y0;
         let xa = x0 + (x2 - x0) * dy / total_h;
@@ -675,26 +688,26 @@ pub async fn fill_triangle<SPI, DC, RST>(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Contexte graphique pour framebuffer
+// Graphics context for framebuffer
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Contexte graphique pour `St7789vBuffered`.
+/// Graphics context for `St7789vBuffered`.
 ///
-/// Identique à [`Graphics`] mais toutes les opérations écrivent dans le
-/// framebuffer RAM via `set_pixel()`. Aucun pixel n'est envoyé à l'écran
-/// avant l'appel à [`St7789vBuffered::flush`].
+/// Identical to [`Graphics`], but all operations write to the RAM
+/// framebuffer via `set_pixel()`. No pixel is sent to the display
+/// until [`St7789vBuffered::flush`] is called.
 ///
-/// # Patron d'utilisation
+/// # Usage pattern
 ///
 /// ```rust,no_run
-/// # async fn demo() {
-/// #     use embassy_st7789v_graphics::{Color, GraphicsBuffered, St7789vBuffered, line_buf, circle_buf};
-/// #     let mut ecran = unsafe { core::mem::MaybeUninit::<St7789vBuffered<_, _, _>>::zeroed().assume_init() };
-/// #     let mut gfx = GraphicsBuffered::new(&mut ecran);
+/// # async fn demo<SPI: embedded_hal_async::spi::SpiDevice, DC: embedded_hal::digital::OutputPin, RST: embedded_hal::digital::OutputPin>(mut display: hazard3_st7789v_graphics::St7789vBuffered<SPI, DC, RST>) {
+/// #     use hazard3_st7789v_graphics::{Color, GraphicsBuffered, St7789vBuffered, line_buf, circle_buf};
+
+/// #     let mut gfx = GraphicsBuffered::new(&mut display);
 ///     line_buf(&mut gfx, 0, 0, 239, 319, Color::WHITE);
 ///     circle_buf(&mut gfx, 120, 160, 60, Color::CYAN);
-///     drop(gfx); // libère le borrow
-///     ecran.flush().await.unwrap(); // tout s'affiche d'un coup
+///     drop(gfx); // release the borrow
+///     display.flush().await.unwrap(); // send the complete frame
 /// # }
 /// ```
 pub struct GraphicsBuffered<'a, SPI, DC, RST = NoPin>
@@ -728,7 +741,7 @@ where
         Self { display }
     }
 
-    /// Écrit un pixel dans le framebuffer avec clipping.
+    /// Writes a pixel to the framebuffer with clipping.
     #[inline(always)]
     pub fn pixel(&mut self, x: i32, y: i32, color: Color) {
         if x >= 0 && y >= 0 && x < SCREEN_W as i32 && y < SCREEN_H as i32 {
@@ -736,7 +749,7 @@ where
         }
     }
 
-    /// Ligne horizontale dans le framebuffer (utilisée par fill_circle_buf, fill_triangle_buf).
+    /// Horizontal line in the framebuffer (used by fill_circle_buf, fill_triangle_buf).
     #[inline]
     fn hline(&mut self, x0: i32, x1: i32, y: i32, color: Color) {
         if y < 0 || y >= SCREEN_H as i32 { return; }
@@ -749,7 +762,7 @@ where
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Primitives framebuffer (synchrones)
+// Framebuffer primitives (synchronous)
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn line_buf<SPI, DC, RST>(

@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "embassy-st7789v-graphics"
+name = "hazard3-st7789v-graphics"
 version = "0.5.0"
 authors = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
 build = false
@@ -9,11 +9,11 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Couche graphique 2D no_std pour écrans TFT LCD ST7789V 240×320, construite au-dessus de embassy-st7789v."
-documentation = "https://docs.rs/embassy-st7789v-graphics"
+description = "no_std 2D graphics for ST7789V displays in the independent Hazard3 Async ecosystem."
+documentation = "https://docs.rs/hazard3-st7789v-graphics"
 readme = "README.md"
 keywords = [
-    "embassy",
+    "hazard3",
     "st7789v",
     "tft",
     "graphics",
@@ -25,14 +25,20 @@ categories = [
     "hardware-support",
 ]
 license = "GPL-2.0-or-later"
-repository = "https://github.com/jorgeandrecastro/embassy-st7789v-graphics"
+repository = "https://github.com/jorgeandrecastro/hazard3-st7789v-graphics"
 
 [lib]
-name = "embassy_st7789v_graphics"
+name = "hazard3_st7789v_graphics"
 path = "src/lib.rs"
 
-[dependencies.embassy-st7789v]
-version= "0.5"
+[features]
+default = ["time-hazard3"]
+time-hazard3 = ["hazard3-st7789v/time-hazard3"]
+time-upstream = ["hazard3-st7789v/time-upstream"]
+
+[dependencies.hazard3-st7789v]
+version = "0.8"
+default-features = false
 
 [dependencies.embedded-hal]
 version = "1.0"

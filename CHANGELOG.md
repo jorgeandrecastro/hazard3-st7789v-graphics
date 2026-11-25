@@ -1,33 +1,42 @@
 # Changelog
 
-Toutes les modifications notables de ce projet sont documentées ici.
-Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
+All notable changes to this project are documented here.
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [0.5.0] — 2026
+
+### Changed
+- Migrated to `hazard3-st7789v-graphics` and the `hazard3_st7789v_graphics` import in the independent Hazard3 Async ecosystem.
+- Replaced the `embassy-st7789v` driver with `hazard3-st7789v` 0.8.
+- The default backend is `time-hazard3`; `time-upstream` enables upstream Embassy when default features are disabled.
+- Re-exported driver types so examples and applications can import them from the graphics crate.
+- The old `embassy-st7789v-graphics` releases were yanked from new dependency resolution.
+
 ## [0.4.0] — 2026
 
-### Ajouté
-- Re-export des constantes mathématiques et géométriques depuis la crate graphique :
+### Added
+- Re-exported mathematical and geometric constants from the graphics crate:
   - `LAMBDA`, `THETA`, `PI`, `DELTA`, `DEGREE`, `PLUS_MINUS`, `TIMES`, `DIVIDE`, `SQRT`, `INFINITY`, `APPROX`, `LE`, `GE`
-- Documentation et exemples mis à jour pour importer ces symboles directement depuis `embassy_st7789v_graphics`
+- Updated documentation and examples to import these symbols directly from `embassy_st7789v_graphics`.
 
-### Modifié
-- Mise à jour de la dépendance `embassy-st7789v` vers la version 0.5
+### Changed
+- Updated the `embassy-st7789v` dependency to version 0.5.
 
 ## [0.3.0] — 2026
 
-### Modifié
-- Mise à jour de la dépendance `embassy-st7789v` vers la version 0.4.0
-- Aucun changement d’API pour cette crate
+### Changed
+- Updated the `embassy-st7789v` dependency to version 0.4.0.
+- No API changes for this crate.
 
 ## [0.2.0] — 2026
 
-### Ajouté
-- `GraphicsBuffered` — contexte graphique pour `St7789vBuffered` (framebuffer RAM)
-  - `new` et `new_no_rst`
-  - `pixel` — écriture RAM avec clipping, synchrone
-  - `hline` — ligne horizontale RAM via `fill_rect_buf`
-- Primitives framebuffer synchrones (zéro clignotement, zéro `.await`) :
+### Added
+- `GraphicsBuffered` — graphics context for `St7789vBuffered` (RAM framebuffer)
+  - `new` and `new_no_rst`
+  - `pixel` — synchronous RAM write with clipping
+  - `hline` — horizontal RAM line via `fill_rect_buf`
+- Synchronous framebuffer primitives (zero flicker, no `.await`):
   - `line_buf`
   - `circle_buf`
   - `fill_circle_buf`
@@ -36,21 +45,21 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/).
   - `ellipse_buf`
   - `bezier_quad_buf`
 
-### Modifié
-- Aucun changement d'API existante — compatibilité ascendante totale
+### Changed
+- No changes to the existing API — fully backward compatible.
 
 ---
 
 ## [0.1.0] — 2026
 
-### Ajouté
-- `Graphics<'a, SPI, DC, RST>` — contexte graphique avec clipping automatique
-- `Graphics::new` et `Graphics::new_no_rst`
-- Primitives async (direct SPI) :
+### Added
+- `Graphics<'a, SPI, DC, RST>` — graphics context with automatic clipping
+- `Graphics::new` and `Graphics::new_no_rst`
+- Async primitives (direct SPI):
   - `line` — Bresenham integer-only
-  - `circle` — midpoint circle integer-only (symétrie 8-octants)
+  - `circle` — midpoint circle integer-only (8-octant symmetry)
   - `fill_circle` — midpoint + hlines via `fill_rect`
-  - `triangle` — contour (3 appels à `line`)
+  - `triangle` — outline (3 calls to `line`)
   - `fill_triangle` — scanline integer-only
-  - `ellipse` — midpoint ellipse integer-only (2 régions)
-  - `bezier_quad` — De Casteljau integer-only virgule fixe ×1024
+  - `ellipse` — midpoint ellipse integer-only (2 regions)
+  - `bezier_quad` — De Casteljau integer-only fixed-point ×1024
