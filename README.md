@@ -6,6 +6,9 @@ It is part of [Hazard3 Async](https://github.com/jorgeandrecastro/hazard3-async)
 an independent ecosystem for the RP2350's RISC-V Hazard3 cores,
 not affiliated with the Embassy project.
 
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20or%20Apache--2.0-blue.svg)](https://opensource.org/licenses/MIT)
+[![docs.rs](https://docs.rs/hazard3-st7789v-graphics/badge.svg)](https://docs.rs/hazard3-st7789v-graphics)
+
 ## Features
 
 The crate re-exports the driver types and the character constants
@@ -51,14 +54,14 @@ of RAM; ensure sufficient memory and stack space for construction.
 
 ```toml
 [dependencies]
-hazard3-st7789v-graphics = "0.5"
+hazard3-st7789v-graphics = "0.6"
 ```
 
 The default `time-hazard3` backend uses `hazard3-time`. The application must
 provide a compatible time driver, executor and configuration:
 see the [Hazard3 Async quick start](https://github.com/jorgeandrecastro/hazard3-async#quick-start).
 If the application also uses the driver directly, select
-`hazard3-st7789v = "0.8"` and the same backend for both dependencies.
+`hazard3-st7789v = "0.9"` and the same backend for both dependencies.
 
 ### Alternative: upstream Embassy
 
@@ -67,9 +70,9 @@ features and select `time-upstream`:
 
 ```toml
 [dependencies]
-hazard3-st7789v-graphics = { version = "0.5", default-features = false, features = ["time-upstream"] }
+hazard3-st7789v-graphics = { version = "0.6", default-features = false, features = ["time-upstream"] }
 # If the driver is also a direct dependency:
-hazard3-st7789v = { version = "0.8", default-features = false, features = ["time-upstream"] }
+hazard3-st7789v = { version = "0.9", default-features = false, features = ["time-upstream"] }
 ```
 
 Exactly one backend must be enabled, with a matching time driver and runtime.
@@ -154,6 +157,16 @@ Direct graphics primitives ignore SPI errors. If the application needs to
 handle them, use the driver methods that return a `Result` directly. The
 `*_buf` primitives only write to memory; `flush()` returns SPI errors.
 
-## License
+## 🛡️ License
 
-GPL-2.0-or-later — Copyright (C) 2026 Jorge Andre Castro
+Licensed under either of:
+
+    MIT license (http://opensource.org/licenses/MIT)
+
+    Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+at your option.
+
+## 🦅 About
+
+Developed by Jorge Andre Castro.

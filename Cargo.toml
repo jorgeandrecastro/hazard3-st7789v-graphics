@@ -1,7 +1,7 @@
 [package]
 edition = "2024"
 name = "hazard3-st7789v-graphics"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
 build = false
 autolib = false
@@ -24,7 +24,7 @@ categories = [
     "no-std",
     "hardware-support",
 ]
-license = "GPL-2.0-or-later"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/jorgeandrecastro/hazard3-st7789v-graphics"
 
 [lib]
@@ -37,7 +37,7 @@ time-hazard3 = ["hazard3-st7789v/time-hazard3"]
 time-upstream = ["hazard3-st7789v/time-upstream"]
 
 [dependencies.hazard3-st7789v]
-version = "0.8"
+version = "0.9"
 default-features = false
 
 [dependencies.embedded-hal]
